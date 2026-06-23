@@ -1,0 +1,21 @@
+name = "ia-status-bot"
+main = "src/index.ts"
+workers_dev = true
+compatibility_date = "2024-05-29"
+
+[[kv_namespaces]]
+binding = "IA_STATUS_KV"
+id = "9677f79186074246be5258eaf9d7aad8"
+
+[triggers]
+# Ejecutar cada 15 minutos para optimizar consumo
+crons = ["*/15 * * * *"]
+
+# Variables de entorno no secretas
+[vars]
+# Puedes agregar variables aquí si es necesario
+
+# Secretos (no poner aquí en texto plano):
+# Configurar ejecutando en la terminal:
+# wrangler secret put DISCORD_WEBHOOK_URL
+# wrangler secret put GEMINI_API_KEY
