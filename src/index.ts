@@ -133,6 +133,16 @@ export default {
 
     // 4. Guardar nuevos estados si hubo algún cambio o si es la primera vez
     if (statesChanged || Object.keys(previousStates).length === 0) {
+      // Si es la primera vez que se ejecuta, enviamos un mensaje de "Bot Iniciado"
+      if (Object.keys(previousStates).length === 0) {
+        await sendDiscordWebhook(
+          env.DISCORD_WEBHOOK_URL,
+          'Monitoreo de IAs',
+          'unknown',
+          'operational',
+          'El bot ha sido desplegado exitosamente y acaba de establecer su línea base. Te avisaré cuando algún servicio se caiga.'
+        );
+      }
       await env.IA_STATUS_KV.put(kvKey, JSON.stringify(currentStates));
     }
   },
