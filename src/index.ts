@@ -272,40 +272,7 @@ export default {
       }
     }
 
-    // 2. Comandos Manuales vía HTTP (Por si no usan Slash Commands o para Pruebas)
-    if (path.startsWith('/status/')) {
-      const command = path.replace('/status/', '');
-      
-      let targetServices = SERVICES;
-      if (command === 'openai' || command === 'chatgpt') {
-        targetServices = SERVICES.filter(s => s.name === 'OpenAI');
-      } else if (command === 'claude') {
-        targetServices = SERVICES.filter(s => s.name === 'Claude (Anthropic)');
-      } else if (command !== 'all') {
-        return new Response('Comando no reconocido. Usa /status/openai, /status/claude o /status/all', { status: 404 });
-      }
-
-      if (!env.DISCORD_WEBHOOK_URL) {
-        return new Response('Error: DISCORD_WEBHOOK_URL no está configurado.', { status: 500 });
-      }
-
-      const results = [];
-      for (const service of targetServices) {
-        const info = await service.checkStatus(env);
-        await sendDiscordWebhook(
-          env.DISCORD_WEBHOOK_URL, 
-          service.name, 
-          'unknown', 
-          info.status, 
-          info.description, 
-          true // isManual = true
-        );
-        results.push(`${service.name}: ${info.status}`);
-      }
-
-      return new Response(`Comando manual ejecutado. Resultados enviados a Discord: \n${results.join('\n')}`);
-    }
-
-    return new Response('Worker de monitoreo activo.\n\nComandos HTTP manuales disponibles:\n- /status/openai\n- /status/claude\n- /status/all');
+    // Solo respondemos un 200 genérico si entran por el navegador
+    return new Response('IA Status Bot: Worker de monitoreo activo y operando de forma segura.');
   }
 };
