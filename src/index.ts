@@ -42,10 +42,17 @@ export interface Env {
 
 type ServiceStatus = 'operational' | 'degraded' | 'maintenance' | 'down' | 'unknown';
 
+interface ComponentStatus {
+  name: string;
+  status: string;
+  isCore: boolean;
+}
+
 interface ServiceInfo {
   name: string;
   status: ServiceStatus;
   description: string;
+  affectedComponents: ComponentStatus[];
 }
 
 interface ServiceConfig {
@@ -53,18 +60,75 @@ interface ServiceConfig {
   checkStatus: (env: Env) => Promise<ServiceInfo>;
 }
 
-// Check Atlassian Statuspage format
-async function checkAtlassianStatus(name: string, url: string): Promise<ServiceInfo> {
+// Check Atlassian Statuspage format focusing on core components
+async function checkAtlassianStatus(
+  name: string,
+  url: string,
+  coreComponentNames: string[]
+): Promise<ServiceInfo> {
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      return { name, status: 'unknown', description: `HTTP Error ${response.status}` };
+      return { 
+        name, 
+        status: 'unknown', 
+        description: `HTTP Error ${response.status}`, 
+        affectedComponents: [] 
+      };
     }
     const data: any = await response.json();
-    const indicator = data.status?.indicator || 'none';
-    let description = data.status?.description || 'Unknown status';
+    const components: any[] = data.components || [];
+    
+    const affectedComponents: ComponentStatus[] = [];
+    let coreStatus: ServiceStatus = 'operational';
 
-    // Parse active incidents if any
+    const mapComponentStatus = (status: string): ServiceStatus => {
+      switch (status) {
+        case 'operational':
+          return 'operational';
+        case 'degraded_performance':
+          return 'degraded';
+        case 'partial_outage':
+          return 'degraded';
+        case 'major_outage':
+          return 'down';
+        case 'under_maintenance':
+          return 'maintenance';
+        default:
+          return 'unknown';
+      }
+    };
+
+    for (const comp of components) {
+      const compName = comp.name || '';
+      const compStatus = comp.status || 'operational';
+      
+      const isCore = coreComponentNames.some(coreName => 
+        compName.toLowerCase() === coreName.toLowerCase()
+      );
+
+      if (compStatus !== 'operational') {
+        affectedComponents.push({
+          name: compName,
+          status: compStatus,
+          isCore
+        });
+
+        if (isCore) {
+          const compMappedStatus = mapComponentStatus(compStatus);
+          
+          if (compMappedStatus === 'down') {
+            coreStatus = 'down';
+          } else if (compMappedStatus === 'degraded' && coreStatus !== 'down') {
+            coreStatus = 'degraded';
+          } else if (compMappedStatus === 'maintenance' && coreStatus !== 'down' && coreStatus !== 'degraded') {
+            coreStatus = 'maintenance';
+          }
+        }
+      }
+    }
+
+    let description = '';
     if (data.incidents && data.incidents.length > 0) {
       const activeIncident = data.incidents[0];
       const statusEmoji = activeIncident.status === 'resolved' ? '✅' : '🔍';
@@ -77,17 +141,18 @@ async function checkAtlassianStatus(name: string, url: string): Promise<ServiceI
         const dateStr = new Date(lastUpdate.updated_at).toLocaleString('es-ES', { timeZone: 'UTC' });
         description += `\n**Último reporte (${dateStr} UTC):**\n> ${lastUpdate.body}`;
       }
+    } else {
+      description = data.status?.description || 'All systems operational';
     }
 
-    let status: ServiceStatus = 'operational';
-    if (indicator === 'minor') status = 'degraded';
-    else if (indicator === 'major' || indicator === 'critical') status = 'down';
-    else if (indicator === 'maintenance') status = 'maintenance';
-    else if (indicator === 'none') status = 'operational';
-
-    return { name, status, description };
+    return { 
+      name, 
+      status: coreStatus, 
+      description, 
+      affectedComponents 
+    };
   } catch (error: any) {
-    return { name, status: 'unknown', description: error.message };
+    return { name, status: 'unknown', description: error.message, affectedComponents: [] };
   }
 }
 
@@ -95,15 +160,31 @@ async function checkAtlassianStatus(name: string, url: string): Promise<ServiceI
 const SERVICES: ServiceConfig[] = [
   {
     name: 'OpenAI',
-    checkStatus: () => checkAtlassianStatus('OpenAI', 'https://status.openai.com/api/v2/summary.json'),
+    checkStatus: () => checkAtlassianStatus('OpenAI', 'https://status.openai.com/api/v2/summary.json', [
+      'Responses',
+      'App',
+      'Conversations',
+      'Login'
+    ]),
   },
   {
     name: 'Claude (Anthropic)',
-    checkStatus: () => checkAtlassianStatus('Claude', 'https://status.claude.com/api/v2/summary.json'),
+    checkStatus: () => checkAtlassianStatus('Claude', 'https://status.claude.com/api/v2/summary.json', [
+      'claude.ai',
+      'Claude API (api.anthropic.com)'
+    ]),
   }
 ];
 
-async function sendDiscordWebhook(url: string, serviceName: string, oldStatus: ServiceStatus, newStatus: ServiceStatus, description: string, isManual: boolean = false) {
+async function sendDiscordWebhook(
+  url: string, 
+  serviceName: string, 
+  oldStatus: ServiceStatus, 
+  newStatus: ServiceStatus, 
+  description: string, 
+  affectedComponents: ComponentStatus[],
+  isManual: boolean = false
+) {
   let color = 0x808080; // gris por defecto
   let title = isManual ? `📊 Estado actual de ${serviceName}` : `⚠️ Cambio de estado en ${serviceName}`;
   
@@ -121,9 +202,29 @@ async function sendDiscordWebhook(url: string, serviceName: string, oldStatus: S
     if (!isManual) title = `🔧 ${serviceName} está en Mantenimiento`;
   }
 
-  const descText = isManual 
-    ? `**Estado Actual:** ${newStatus.toUpperCase()}\n\n**Detalles:** ${description}`
-    : `El estado ha cambiado de **${oldStatus}** a **${newStatus}**.\n\n**Detalles:** ${description}`;
+  let descText = isManual 
+    ? `**Estado del Servicio Principal:** ${newStatus.toUpperCase()}\n\n**Detalles:** ${description}`
+    : `El estado del servicio principal ha cambiado de **${oldStatus}** a **${newStatus}**.\n\n**Detalles:** ${description}`;
+
+  // Agregar detalle de componentes afectados si existen
+  if (affectedComponents && affectedComponents.length > 0) {
+    const coreAffections = affectedComponents.filter(c => c.isCore);
+    const secondaryAffections = affectedComponents.filter(c => !c.isCore);
+
+    if (coreAffections.length > 0) {
+      descText += `\n\n**🔴 Componentes Principales Afectados (Servicio Interrumpido/Degradado):**\n`;
+      for (const comp of coreAffections) {
+        descText += `• **${comp.name}**: \`${comp.status.replace(/_/g, ' ')}\`\n`;
+      }
+    }
+
+    if (secondaryAffections.length > 0) {
+      descText += `\n\n**⚠️ Servicios Secundarios con Falla:**\n`;
+      for (const comp of secondaryAffections) {
+        descText += `• **${comp.name}**: \`${comp.status.replace(/_/g, ' ')}\` *(IA principal aún utilizable)*\n`;
+      }
+    }
+  }
 
   const payload = {
     embeds: [
@@ -177,7 +278,15 @@ export default {
       // 3. Comparar y enviar alerta si cambió
       if (info.status !== oldStatus && oldStatus !== 'unknown' && info.status !== 'unknown') {
         console.log(`Estado cambiado para ${service.name}: ${oldStatus} -> ${info.status}`);
-        await sendDiscordWebhook(env.DISCORD_WEBHOOK_URL, service.name, oldStatus, info.status, info.description, false);
+        await sendDiscordWebhook(
+          env.DISCORD_WEBHOOK_URL, 
+          service.name, 
+          oldStatus, 
+          info.status, 
+          info.description, 
+          info.affectedComponents, 
+          false
+        );
         statesChanged = true;
       } else if (oldStatus === 'unknown' && info.status !== 'unknown') {
         // Primera ejecución exitosa o recuperación de un estado unknown previo
@@ -195,7 +304,8 @@ export default {
           'Monitoreo de IAs',
           'unknown',
           'operational',
-          'El bot ha sido desplegado exitosamente y acaba de establecer su línea base. Te avisaré cuando algún servicio se caiga.',
+          'El bot ha sido desplegado exitosamente y acaba de establecer su línea base. Te avisaré cuando algún servicio principal se caiga.',
+          [],
           false
         );
       }
@@ -256,6 +366,7 @@ export default {
                 'unknown', 
                 info.status, 
                 info.description, 
+                info.affectedComponents, 
                 true
               );
             }
