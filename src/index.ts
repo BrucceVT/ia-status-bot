@@ -176,18 +176,17 @@ const SERVICES: ServiceConfig[] = [
   }
 ];
 
-function getUsabilityExplanation(compStatus: string, serviceName: string): string {
-  const mainIA = serviceName === 'OpenAI' ? 'ChatGPT y la API principal' : 'Claude (Chat y API)';
+function getUsabilityExplanation(compStatus: string): string {
   switch (compStatus) {
     case 'degraded_performance':
     case 'partial_outage':
-      return `Esta herramienta presenta fallas o lentitud pero está **Utilizable**. (El servicio de ${mainIA} sigue operativo).`;
+      return `Esta herramienta presenta fallas o lentitud pero está **Utilizable**.`;
     case 'major_outage':
-      return `Esta herramienta **NO está disponible** temporalmente. (El servicio de ${mainIA} sigue operativo).`;
+      return `Esta herramienta **NO está disponible** temporalmente.`;
     case 'under_maintenance':
-      return `Esta herramienta está en **Mantenimiento**. (El servicio de ${mainIA} sigue operativo).`;
+      return `Esta herramienta está en **Mantenimiento**.`;
     default:
-      return `Esta herramienta presenta un estado inestable. (El servicio de ${mainIA} sigue operativo).`;
+      return `Esta herramienta presenta un estado inestable.`;
   }
 }
 
@@ -249,9 +248,10 @@ async function sendDiscordWebhook(
     }
 
     if (secondaryAffections.length > 0) {
-      descText += `\n\n**⚠️ Servicios Secundarios con Falla:**\n`;
+      const mainIA = serviceName === 'OpenAI' ? 'ChatGPT y la API principal' : 'Claude (Chat y API)';
+      descText += `\n\n**⚠️ Servicios Secundarios con Falla** *(El servicio principal de ${mainIA} sigue operativo):*\n`;
       for (const comp of secondaryAffections) {
-        const expl = getUsabilityExplanation(comp.status, serviceName);
+        const expl = getUsabilityExplanation(comp.status);
         descText += `• **${comp.name}** (\`${comp.status.replace(/_/g, ' ')}\`):\n  └> ${expl}\n`;
       }
     }
