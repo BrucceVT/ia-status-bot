@@ -176,6 +176,35 @@ const SERVICES: ServiceConfig[] = [
   }
 ];
 
+function getUsabilityExplanation(compStatus: string, serviceName: string): string {
+  const mainIA = serviceName === 'OpenAI' ? 'ChatGPT y la API principal' : 'Claude (Chat y API)';
+  switch (compStatus) {
+    case 'degraded_performance':
+    case 'partial_outage':
+      return `Esta herramienta presenta fallas o lentitud pero está **Utilizable**. (El servicio de ${mainIA} sigue operativo).`;
+    case 'major_outage':
+      return `Esta herramienta **NO está disponible** temporalmente. (El servicio de ${mainIA} sigue operativo).`;
+    case 'under_maintenance':
+      return `Esta herramienta está en **Mantenimiento**. (El servicio de ${mainIA} sigue operativo).`;
+    default:
+      return `Esta herramienta presenta un estado inestable. (El servicio de ${mainIA} sigue operativo).`;
+  }
+}
+
+function getCoreUsabilityExplanation(compStatus: string, compName: string): string {
+  switch (compStatus) {
+    case 'degraded_performance':
+    case 'partial_outage':
+      return `El acceso o uso de **${compName}** está inestable o lento temporalmente.`;
+    case 'major_outage':
+      return `El acceso o uso de **${compName}** **NO está disponible** (Caída total).`;
+    case 'under_maintenance':
+      return `**${compName}** se encuentra en mantenimiento programado.`;
+    default:
+      return `Estado inestable para **${compName}**.`;
+  }
+}
+
 async function sendDiscordWebhook(
   url: string, 
   serviceName: string, 
@@ -214,14 +243,16 @@ async function sendDiscordWebhook(
     if (coreAffections.length > 0) {
       descText += `\n\n**🔴 Componentes Principales Afectados (Servicio Interrumpido/Degradado):**\n`;
       for (const comp of coreAffections) {
-        descText += `• **${comp.name}**: \`${comp.status.replace(/_/g, ' ')}\`\n`;
+        const expl = getCoreUsabilityExplanation(comp.status, comp.name);
+        descText += `• **${comp.name}** (\`${comp.status.replace(/_/g, ' ')}\`):\n  └> ${expl}\n`;
       }
     }
 
     if (secondaryAffections.length > 0) {
       descText += `\n\n**⚠️ Servicios Secundarios con Falla:**\n`;
       for (const comp of secondaryAffections) {
-        descText += `• **${comp.name}**: \`${comp.status.replace(/_/g, ' ')}\` *(IA principal aún utilizable)*\n`;
+        const expl = getUsabilityExplanation(comp.status, serviceName);
+        descText += `• **${comp.name}** (\`${comp.status.replace(/_/g, ' ')}\`):\n  └> ${expl}\n`;
       }
     }
   }
